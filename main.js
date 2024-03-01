@@ -1,11 +1,3 @@
-/*
- | Video Calling Application using Agora SDK
- |--------------------------------------------
- | This file contains the JavaScript required to handle video calling functionality
- | in a web application. It leverages Agora's Real-Time Messaging (RTM) and WebRTC
- | technologies to provide peer-to-peer communication.
- */
-
 /**
  * The Agora App ID.
  * @type {string}
