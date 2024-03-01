@@ -1,6 +1,6 @@
 
  # Video Calling Application using [Agora SDK]('https://api-ref.agora.io/en/signaling-sdk/web/1.x/index.html)
- This is a JavaScript application for video calling functionality in a web application. It leverages Agora's Real-Time Messaging (RTM) and WebRTC technologies to provide peer-to-peer communication.
+ This is a JavaScript application that provides video calling functionality on the web. It leverages Agora's Real-Time Messaging (RTM) and WebRTC technologies for peer-to-peer communication.
  
 ### Installation
 * 1 - clone repo https://github.com/divanov11/PeerChat
