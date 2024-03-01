@@ -1,14 +1,51 @@
+/*
+ | Video Calling Application using Agora SDK
+ |--------------------------------------------
+ | This file contains the JavaScript required to handle video calling functionality
+ | in a web application. It leverages Agora's Real-Time Messaging (RTM) and WebRTC
+ | technologies to provide peer-to-peer communication.
+ */
+
+/**
+ * The Agora App ID.
+ * @type {string}
+ */
 let APP_ID = "b5c070d4959649b09efec7a801228ae8"
-let localStream;
-let remoteStream;
-let peerConnection;
 
 let token = null;
+
+/**
+ * Unique identifier for the user.
+ * @type {string}
+ */
 let uid = String(Math.floor(Math.random() * 10000));
 
 let client;
 let channel;
 
+/**
+ * Extracts the room ID from the URL parameters.
+ */
+let queryString = window.location.search;
+let urlParams = new URLSearchParams(queryString);
+let roomId = urlParams.get('room');
+
+// Redirect to the lobby if no room ID is present in the URL
+if (!roomId) {
+    window.location = 'lobby.html'
+}
+
+let localStream;
+let remoteStream;
+let peerConnection;
+
+/**
+ * Configuration object for ICE (Interactive Connectivity Establishment) servers.
+ * ICE servers are used to enable WebRTC calls to traverse NATs and firewalls.
+ * @type {Object}
+ * @property {Array} iceServers - Array of ICE server configuration objects.
+ * @property {Array} iceServers.urls - Array of STUN server URLs.
+ */
 const servers = {
     iceServers: [
         {
@@ -17,37 +54,101 @@ const servers = {
     ]
 }
 
+/**
+ * The constraints object specifying the media types and their settings to be requested
+ * during a call to getUserMedia.
+ * @type {Object}
+ * @property {Object} video - The video settings.
+ * @property {Object} video.width - Constraints for video width.
+ * @property {number} video.width.min - The minimum width of the video.
+ * @property {number} video.width.ideal - The ideal width of the video.
+ * @property {number} video.width.max - The maximum width of the video.
+ * @property {Object} video.height - Constraints for video height.
+ * @property {number} video.height.min - The minimum height of the video.
+ * @property {number} video.height.ideal - The ideal height of the video.
+ * @property {number} video.height.max - The maximum height of the video.
+ * @property {boolean} audio - Indicates whether audio is enabled or not.
+ */
+let constraints = {
+    video: {
+        width: { min: 640, ideal: 1920, max: 1920 },
+        height: { min: 480, ideal: 1080, max: 1080 }
+    },
+    audio: true
+}
+
+/**
+ * Initializes the application by connecting to the Agora RTM service,
+ * entering the channel, and setting up local video/audio streams.
+ * @returns {Promise<void>} A promise that resolves when the initialization is complete.
+ */
 let init = async () => {
     client = await AgoraRTM.createInstance(APP_ID)
     await client.login({ uid, token });
 
     //index.html?room=235434
-    channel = client.createChannel('main');
+    channel = client.createChannel(roomId);
     await channel.join();
 
     channel.on('MemberJoined', handleUserJoined)
+    channel.on('MemberLeft', handleUserLeft)
 
     client.on('MessageFromPeer', handleMessageFromPeer)
 
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
     document.getElementById('user-1').srcObject = localStream;
 }
 
-let handleMessageFromPeer = async (message, memberId) => {
-    message = JSON.parse(message.text);
-    console.log('Message :', message);
+/**
+ * Handler called when a user leaves the channel.
+ * @param {string} MemberId - The ID of the member that left.
+ */
+let handleUserLeft = (MemberId) => {
+    document.getElementById('user-2').style.display = 'none';
+    document.getElementById('user-1').classList.remove('smallFrame')
 }
 
+/**
+ * Handler for messages received from peers.
+ * @param {Object} message - The received message object.
+ * @param {string} memberId - The ID of the member that sent the message.
+ */
+let handleMessageFromPeer = async (message, memberId) => {
+    message = JSON.parse(message.text);
+    if (message.type === 'offer') {
+        await createAnswer(memberId, message.offer)
+    }
+    if (message.type === 'answer') {
+        addAnswer(message.answer)
+    }
+    if (message.type === 'candidate') {
+        if (peerConnection) {
+            peerConnection.addIceCandidate(message.candidate)
+        }
+    }
+}
+
+/**
+ * Handler called when a new user joins the channel.
+ * @param {string} MemberId - The ID of the member that joined.
+ */
 let handleUserJoined = async (MemberId) => {
     console.log('A new user joined the channel:', MemberId)
     createOffer(MemberId)
 }
 
+/**
+ * Sets up a peer connection and handles the addition of media tracks.
+ * @param {string} MemberId - The ID of the member to create a connection with.
+ */
 let createPeerConnection = async (MemberId) => {
     peerConnection = new RTCPeerConnection(servers);
 
     remoteStream = new MediaStream();
     document.getElementById('user-2').srcObject = remoteStream;
+    document.getElementById('user-2').style.display = 'block';
+
+    document.getElementById('user-1').classList.add('smallFrame')
 
     if (!localStream) {
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -70,6 +171,11 @@ let createPeerConnection = async (MemberId) => {
         }
     }
 }
+
+/**
+ * Creates an SDP offer for establishing a peer connection.
+ * @param {string} MemberId - The ID of the member to send the offer to.
+ */
 let createOffer = async (MemberId) => {
     await createPeerConnection(MemberId);
 
@@ -78,7 +184,78 @@ let createOffer = async (MemberId) => {
     client.sendMessageToPeer({ text: JSON.stringify({ 'type': 'offer', 'offer': offer }) }, MemberId)
 }
 
-let createAnswer = async (MemberId) => {
+/**
+ * Creates an SDP answer in response to an offer received.
+ * @param {string} MemberId - The ID of the member that sent the offer.
+ * @param {RTCSessionDescriptionInit} offer - The offer received.
+ */
+let createAnswer = async (MemberId, offer) => {
+    await createPeerConnection(MemberId);
 
+    await peerConnection.setRemoteDescription(offer);
+
+    let answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    client.sendMessageToPeer({ text: JSON.stringify({ 'type': 'answer', 'answer': answer }) }, MemberId)
 }
+
+/**
+ * Adds a received SDP answer to the peer connection.
+ * @param {RTCSessionDescriptionInit} answer - The answer received.
+ */
+let addAnswer = async (answer) => {
+    if (!peerConnection.currentRemoteDescription) {
+        peerConnection.setRemoteDescription(answer);
+    }
+}
+
+/**
+ * Leaves the Agora channel and logs out of the RTM client.
+ */
+let leaveChannel = async () => {
+    await channel.leave();
+    await client.logout();
+}
+
+/**
+ * Toggles the camera on or off.
+ * @async
+ * @function toggleCamera
+ */
+let toggleCamera = async () => {
+    let videoTrack = localStream.getTracks().find(track => track.kind === 'video');
+    if (videoTrack.enabled) {
+        videoTrack.enabled = false;
+        document.getElementById('camera-btn').style.backgroundColor = 'rgb(155, 27, 49)'
+    } else {
+        videoTrack.enabled = true;
+        document.getElementById('camera-btn').style.backgroundColor = 'rgb(0, 156, 119,0.9)'
+    }
+}
+
+/**
+ * Toggles the microphone on/off.
+ * @async
+ * @function toggleMic
+ */
+let toggleMic = async () => {
+    let audioTrack = localStream.getTracks().find(track => track.kind === 'audio')
+
+    if (audioTrack.enabled) {
+        audioTrack.enabled = false
+        document.getElementById('mic-btn').style.backgroundColor = 'rgb(155, 27, 49)'
+    } else {
+        audioTrack.enabled = true
+        document.getElementById('mic-btn').style.backgroundColor = 'rgb(0, 156, 119,0.9)'
+    }
+}
+
+// Event listener to handle channel leaving on page unload
+window.addEventListener('beforeunload', leaveChannel);
+
+// Button event listeners for toggling camera and microphone
+document.getElementById('camera-btn').addEventListener('click', toggleCamera)
+document.getElementById('mic-btn').addEventListener('click', toggleMic)
+
+// Start the application
 init();
